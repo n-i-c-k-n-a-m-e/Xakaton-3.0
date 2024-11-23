@@ -1,0 +1,457 @@
+```{r}
+install.packages(c("dplyr", "tidyr", "readr", "jsonlite", "arrow", "ggplot2", "lubridate", "rmarkdown"))
+
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(readr)
+library(jsonlite)
+library(arrow)
+library(ggplot2)
+library(lubridate)
+library(readr)
+library(rvest)
+```
+!!!
+```{r}
+# Подключаем необходимые библиотеки
+library(httr)
+library(readr)
+library(stringr)
+
+# Функция для преобразования ссылок из /blob/ в /raw/
+convert_to_raw_url <- function(blob_url) {
+  gsub("/blob/", "/raw/", blob_url)
+}
+
+# Функция безопасной загрузки .csv файла с отладкой
+load_csv_safe <- function(url) {
+  tryCatch({
+    message(paste("Попытка загрузки файла:", url))
+    # Попытка загрузить файл
+    data <- read_csv(url, show_col_types = FALSE)  # Отключаем вывод типов колонок
+    message(paste("Файл успешно загружен:", url))
+    return(data)
+  }, error = function(e) {
+    # Если произошла ошибка
+    message(paste("Ошибка при загрузке файла:", url))
+    message(paste("Описание ошибки:", e$message))
+    return(NULL)  # Возвращаем NULL в случае ошибки
+  })
+}
+
+# Проверяем доступность ссылок на .csv файлы
+check_links <- function(links) {
+  if (length(links) == 0) {
+    stop("Не найдено ни одной ссылки на .csv файлы.")
+  } else {
+    message("Список ссылок на .csv файлы:")
+    print(links)
+  }
+}
+
+# Основная функция для загрузки файлов из GitHub
+load_csv_files_from_github <- function(repo_url, folder_path) {
+  # Пример: repo_url = "https://github.com/d-yacenko/dataset"
+  # Пример: folder_path = "telecom10k/"
+  
+  # Формируем URL для API GitHub
+  api_url <- paste0("https://api.github.com/repos/",
+                    str_replace(repo_url, "https://github.com/", ""),
+                    "/contents/",
+                    folder_path)
+  
+  # Отправляем запрос к API GitHub
+  response <- GET(api_url)
+  
+  if (status_code(response) != 200) {
+    stop("Ошибка при обращении к API GitHub. Проверьте URL репозитория и папки.")
+  }
+  
+  # Получаем содержимое папки
+  content <- content(response, as = "parsed")
+  
+  # Извлекаем ссылки на файлы .csv
+  raw_csv_links <- sapply(content, function(file_info) {
+    if (!is.null(file_info$download_url) && grepl("\\.csv$", file_info$name)) {
+      return(file_info$download_url)
+    } else {
+      return(NULL)
+    }
+  })
+  
+  # Удаляем NULL значения
+  raw_csv_links <- raw_csv_links[!sapply(raw_csv_links, is.null)]
+  
+  # Проверяем ссылки
+  check_links(raw_csv_links)
+  
+  # Загружаем все .csv файлы с задержкой между запросами
+  all_data <- lapply(raw_csv_links, function(link) {
+    Sys.sleep(1)  # Задержка в 1 секунду между запросами
+    load_csv_safe(link)
+  })
+  
+  # Возвращаем список загруженных данных
+  return(all_data)
+}
+
+# Тестируем функцию с репозиторием d-yacenko/dataset и папкой telecom10k/
+repo_url <- "https://github.com/d-yacenko/dataset"
+folder_path <- "telecom10k/"  # Путь к папке в репозитории
+
+all_data <- load_csv_files_from_github(repo_url, folder_path)
+
+# Выводим загруженные данные для проверки
+print(all_data)
+
+
+
+```
+!!!
+
+#Создание общего файла
+```{r}
+# Подключаем необходимые библиотеки
+library(httr)
+library(readr)
+library(stringr)
+library(dplyr)
+
+# Функция для преобразования ссылок из /blob/ в /raw/
+convert_to_raw_url <- function(blob_url) {
+  gsub("/blob/", "/raw/", blob_url)
+}
+
+# Функция безопасной загрузки .csv файла с отладкой
+load_csv_safe <- function(url) {
+  tryCatch({
+    message(paste("Попытка загрузки файла:", url))
+    # Попытка загрузить файл
+    data <- read_csv(url, show_col_types = FALSE)  # Отключаем вывод типов колонок
+    message(paste("Файл успешно загружен:", url))
+    return(data)
+  }, error = function(e) {
+    # Если произошла ошибка
+    message(paste("Ошибка при загрузке файла:", url))
+    message(paste("Описание ошибки:", e$message))
+    return(NULL)  # Возвращаем NULL в случае ошибки
+  })
+}
+
+# Проверяем доступность ссылок на .csv файлы
+check_links <- function(links) {
+  if (length(links) == 0) {
+    stop("Не найдено ни одной ссылки на .csv файлы.")
+  } else {
+    message("Список ссылок на .csv файлы:")
+    print(links)
+  }
+}
+
+# Основная функция для загрузки файлов из GitHub и объединения их в одну таблицу
+load_and_combine_csv_files <- function(repo_url, folder_path) {
+  # Пример: repo_url = "https://github.com/d-yacenko/dataset"
+  # Пример: folder_path = "telecom10k/"
+  
+  # Формируем URL для API GitHub
+  api_url <- paste0("https://api.github.com/repos/",
+                    str_replace(repo_url, "https://github.com/", ""),
+                    "/contents/",
+                    folder_path)
+  
+  # Отправляем запрос к API GitHub
+  response <- GET(api_url)
+  
+  if (status_code(response) != 200) {
+    stop("Ошибка при обращении к API GitHub. Проверьте URL репозитория и папки.")
+  }
+  
+  # Получаем содержимое папки
+  content <- content(response, as = "parsed")
+  
+  # Извлекаем ссылки на файлы .csv
+  raw_csv_links <- sapply(content, function(file_info) {
+    if (!is.null(file_info$download_url) && grepl("\\.csv$", file_info$name)) {
+      return(file_info$download_url)
+    } else {
+      return(NULL)
+    }
+  })
+  
+  # Удаляем NULL значения
+  raw_csv_links <- raw_csv_links[!sapply(raw_csv_links, is.null)]
+  
+  # Проверяем ссылки
+  check_links(raw_csv_links)
+  
+  # Загружаем все .csv файлы с задержкой между запросами
+  all_data <- lapply(raw_csv_links, function(link) {
+    Sys.sleep(1)  # Задержка в 1 секунду между запросами
+    load_csv_safe(link)
+  })
+  
+  # Удаляем NULL значения из списка данных
+  all_data <- all_data[!sapply(all_data, is.null)]
+  
+  if (length(all_data) == 0) {
+    stop("Не удалось загрузить ни одного файла.")
+  }
+  
+  # Объединяем все таблицы в одну
+  combined_data <- bind_rows(all_data)
+  
+  message("Все файлы успешно объединены в одну таблицу.")
+  
+  return(combined_data)
+}
+
+# Тестируем функцию с репозиторием d-yacenko/dataset и папкой telecom10k/
+repo_url <- "https://github.com/d-yacenko/dataset"
+folder_path <- "telecom10k/"  # Путь к папке в репозитории
+
+combined_data <- load_and_combine_csv_files(repo_url, folder_path)
+
+# Выводим первые строки объединенной таблицы для проверки
+print(head(combined_data))
+
+```
+#Запись файла 
+```{r}
+write_csv(combined_data, "combined_dataset.csv")
+```
+#Разделение датасетов по числам с 31.12 по 07.01
+```{r}
+# Подключаем необходимые библиотеки
+library(dplyr)
+library(readr)
+
+# Шаг 1: Загружаем датасет
+combined_dataset <- read_csv("combined_dataset.csv")
+
+# Шаг 2: Проверяем структуру данных
+str(combined_dataset)  # Убедимся, что столбец StartSession существует
+
+# Шаг 3: Преобразуем StartSession в формат даты и времени
+combined_dataset <- combined_dataset %>%
+  mutate(
+    StartSession = as.POSIXct(StartSession, format = "%d-%m-%Y %H:%M:%S"), # Указываем формат d m Y H M S
+    date = as.Date(StartSession)  # Извлекаем только дату (без времени)
+  ) %>%
+  filter(!is.na(date))  # Удаляем строки с NA (если есть некорректные даты)
+
+# Шаг 4: Проверяем доступные даты
+available_dates <- unique(combined_dataset$date)
+print(available_dates)  # Выводим доступные даты
+
+# Шаг 5: Указываем диапазон дат для фильтрации
+start_date <- as.Date("2023-12-31")  # Начальная дата
+end_date <- as.Date("2024-01-07")    # Конечная дата
+
+# Проверяем, есть ли данные в указанном диапазоне
+if (any(available_dates >= start_date & available_dates <= end_date, na.rm = TRUE)) {
+  # Фильтруем данные по диапазону дат
+  filtered_data <- combined_dataset %>%
+    filter(date >= start_date & date <= end_date)
+
+  # Шаг 6: Разделяем данные на отдельные файлы по дням
+  for (i in 0:7) {
+    specific_date <- start_date + i
+    specific_data <- filtered_data %>%
+      filter(date == specific_date)
+
+    if (nrow(specific_data) > 0) {
+      output_file <- paste0("dataset_", specific_date, ".csv")
+      write_csv(specific_data, output_file)
+    }
+  }
+  
+  message("Датасеты успешно разделены и сохранены.")
+} else {
+  stop("В указанном диапазоне дат нет данных. Доступные даты: ", paste(available_dates, collapse = ", "))
+}
+
+
+```
+#Скачивание паркет файлов
+```{r}
+library(httr)
+library(rvest)
+library(arrow)
+
+# Функция для скачивания файлов
+download_file <- function(url, save_path) {
+  response <- GET(url, write_disk(save_path, overwrite = TRUE))
+  if (response$status_code == 200) {
+    message(paste("Скачан файл:", save_path))
+  } else {
+    message(paste("Не удалось скачать файл:", url, "(HTTP", response$status_code, ")"))
+  }
+}
+
+# Основная функция
+download_parquet_files_from_github <- function() {
+  # URL репозитория GitHub
+  base_url <- "https://github.com/d-yacenko/dataset/tree/main/telecom10k"
+  raw_base_url <- "https://raw.githubusercontent.com/d-yacenko/dataset/main/telecom10k/"
+  
+  # Папка для сохранения файлов
+  save_directory <- "parquet_files"
+  if (!dir.exists(save_directory)) dir.create(save_directory)
+  
+  # Скачиваем HTML-страницу с файлами
+  response <- GET(base_url)
+  if (response$status_code != 200) {
+    stop(paste("Не удалось получить доступ к странице", base_url, "(HTTP", response$status_code, ")"))
+  }
+  
+  # Парсим HTML страницу
+  html_content <- content(response, as = "text", encoding = "UTF-8")
+  parsed_html <- read_html(html_content)
+  
+  # Ищем ссылки на файлы .parquet
+  links <- parsed_html %>%
+    html_nodes("a") %>%
+    html_attr("href")
+  
+  # Фильтруем только файлы .parquet
+  parquet_files <- links[grepl("\\.parquet$", links)]
+  
+  if (length(parquet_files) == 0) {
+    message("Файлы .parquet не найдены.")
+    return()
+  }
+  
+  # Скачиваем каждый файл
+  for (file_link in parquet_files) {
+    file_name <- basename(file_link) # Извлекаем имя файла
+    file_url <- paste0(raw_base_url, file_name) # Формируем URL для скачивания
+    save_path <- file.path(save_directory, file_name) # Локальный путь для сохранения
+    
+    # Скачиваем файл
+    download_file(file_url, save_path)
+  }
+  
+  message("Все файлы успешно скачаны!")
+}
+
+# Запуск программы
+download_parquet_files_from_github()
+```
+#Проверка данных внутри 
+```{r}
+library(arrow)
+
+# Читаем один из файлов Parquet для анализа
+file <- "parquet_files/client.parquet"  # Замените на ваш путь
+data <- read_parquet(file)
+
+# Выводим типы данных всех столбцов
+sapply(data, class)
+
+
+```
+#physical.parquet-> .csv
+```{r}
+library(arrow)
+library(base64enc)
+
+# Читаем файл Parquet
+file <- "parquet_files/physical.parquet"  # Замените на ваш путь
+data <- read_parquet(file)
+
+# Обрабатываем столбец Phones (arrow_binary -> Base64)
+if ("Phones" %in% colnames(data)) {
+  data$Phones <- sapply(data$Phones, function(x) {
+    if (!is.null(x)) {
+      # Преобразуем бинарные данные в Base64
+      base64encode(as.raw(x))
+    } else {
+      NA  # Если значение NULL, оставляем NA
+    }
+  })
+}
+
+# Записываем данные в CSV
+write.csv(data, file = "physical.csv", row.names = FALSE, fileEncoding = "UTF-8")
+
+cat("Файл успешно сохранен как physical.csv\n")
+
+```
+#company.parquet-> .csv
+```{r}
+library(arrow)
+library(base64enc)
+
+# Читаем файл Parquet
+file <- "parquet_files/company.parquet"  # Замените на ваш путь
+data <- read_parquet(file)
+
+# Функция для преобразования arrow_binary в Base64
+convert_binary_to_base64 <- function(column) {
+  sapply(column, function(x) {
+    if (!is.null(x)) {
+      base64encode(as.raw(x))  # Преобразуем бинарные данные в Base64
+    } else {
+      NA  # Если значение NULL, оставляем NA
+    }
+  })
+}
+
+# Преобразуем столбцы с типом arrow_binary (Phones и Contact)
+if ("Phones" %in% colnames(data)) {
+  data$Phones <- convert_binary_to_base64(data$Phones)
+}
+
+if ("Contact" %in% colnames(data)) {
+  data$Contact <- convert_binary_to_base64(data$Contact)
+}
+
+# Записываем данные в CSV
+write.csv(data, file = "company.csv", row.names = FALSE, fileEncoding = "UTF-8")
+
+cat("Файл успешно сохранен как company.csv\n")
+
+```
+#client.parquet-> .csv
+```{r}
+library(arrow)
+
+# Читаем файл Parquet
+file <- "parquet_files/client.parquet"  # Укажите путь к вашему файлу Parquet
+data <- read_parquet(file)
+
+# Записываем данные в CSV
+write.csv(data, file = "client.csv", row.names = FALSE, fileEncoding = "UTF-8")
+
+cat("Файл успешно сохранен как client.csv\n")
+
+```
+#Открытие таблиц для наглядности 
+```{r}
+# Чтение CSV файла
+company <- read.csv("CSV_parquet/company.csv")
+
+# Открытие таблицы в отдельном окне
+View(company)
+# Чтение CSV файла
+client <- read.csv("CSV_parquet/client.csv")
+
+# Открытие таблицы в отдельном окне
+View(client)
+# Чтение CSV файла
+physical <- read.csv("CSV_parquet/physical.csv")
+
+# Открытие таблицы в отдельном окне
+View(physical)
+# Чтение CSV файла
+combined_dataset <- read.csv("combined_dataset.csv")
+
+# Открытие таблицы в отдельном окне
+View(combined_dataset)
+
+
+```
+
