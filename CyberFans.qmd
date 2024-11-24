@@ -237,64 +237,6 @@ download_parquet_files_from_github()
 ```
 
 
-## Running Code
-
-```{r}
-library(dplyr)
-library(lubridate)
-
-# Загрузка данных
-data <- read.csv("combined_datasets.csv", stringsAsFactors = FALSE)
-
-# Преобразование StartSession в формат даты/времени
-data$StartSession <- ymd_hms(data$StartSession)
-
-# Агрегация данных по IdSubscriber и StartSession
-aggregated_data <- data %>%
-  group_by(IdSubscriber, StartSession) %>%
-  summarise(
-    total_up_traffic = sum(UpTx, na.rm = TRUE),
-    total_down_traffic = sum(DownTx, na.rm = TRUE),
-    session_count = n()
-  ) %>%
-  ungroup()
-
-# Вычисление статистик для анализа аномалий
-traffic_stats <- aggregated_data %>%
-  summarise(
-    median_up = median(total_up_traffic, na.rm = TRUE),
-    iqr_up = IQR(total_up_traffic, na.rm = TRUE),
-    median_down = median(total_down_traffic, na.rm = TRUE),
-    iqr_down = IQR(total_down_traffic, na.rm = TRUE)
-  )
-
-# Установка границ для аномалий
-lower_bound_up <- traffic_stats$median_up - 1.5 * traffic_stats$iqr_up
-upper_bound_up <- traffic_stats$median_up + 1.5 * traffic_stats$iqr_up
-
-lower_bound_down <- traffic_stats$median_down - 1.5 * traffic_stats$iqr_down
-upper_bound_down <- traffic_stats$median_down + 1.5 * traffic_stats$iqr_down
-
-# Функция для выявления аномалий
-aggregated_data <- aggregated_data %>%
-  mutate(
-    is_anomalous_up = total_up_traffic < lower_bound_up | total_up_traffic > upper_bound_up,
-    is_anomalous_down = total_down_traffic < lower_bound_down | total_down_traffic > upper_bound_down,
-    is_anomalous = is_anomalous_up | is_anomalous_down
-  )
-
-# Фильтрация предположительно взломанных пользователей
-anomalous_users <- aggregated_data %>%
-  filter(is_anomalous) %>%
-  select(IdSubscriber, StartSession, total_up_traffic, total_down_traffic, is_anomalous_up, is_anomalous_down)
-
-# Сохранение списка аномалий в файл
-write.csv(anomalous_users, "anomalous_users.csv", row.names = FALSE)
-
-# Просмотр результатов
-print("Предположительно взломанные пользователи:")
-print(anomalous_users)
-```
 
 
 #перевод .parquet файла в csv. physical.parquet-> .csv
